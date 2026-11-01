@@ -5,8 +5,10 @@ import useSWR from "swr"
 import { ActivityTimeline } from "@/components/activity-timeline"
 import { AdminAccessDialog } from "@/components/admin-access-dialog"
 import { Brand } from "@/components/brand"
+import { OnlineVisitorsPanel, type OnlineVisitor } from "@/components/online-visitors"
 import { RequestCard } from "@/components/request-card"
 import { RequestForm } from "@/components/request-form"
+import { VisitorNameDialog } from "@/components/visitor-name-dialog"
 import {
   REQUEST_CATEGORIES,
   type CreateRequestInput,
@@ -15,7 +17,6 @@ import {
   type RequestsPayload,
 } from "@/lib/demands"
 import {
-  ArrowRight,
   ArrowUpRight,
   Check,
   Eye,
@@ -32,6 +33,8 @@ type PageTab = "demands" | "history"
 type StatusFilter = "todos" | RequestStatus | "atrasadas"
 type Notice = { tone: "success" | "error"; message: string }
 type AdminSessionPayload = { authenticated: boolean; name: string | null }
+type VisitorPresencePayload = { visitorName: string | null }
+type AdminPresencePayload = { visitors: OnlineVisitor[] }
 
 const fetcher = async (url: string): Promise<RequestsPayload> => {
   const response = await fetch(url, { cache: "no-store" })
@@ -42,6 +45,24 @@ const fetcher = async (url: string): Promise<RequestsPayload> => {
 const sessionFetcher = async (url: string): Promise<AdminSessionPayload> => {
   const response = await fetch(url, { cache: "no-store" })
   if (!response.ok) throw new Error("Não foi possível validar o acesso administrativo.")
+  return response.json()
+}
+
+const presenceFetcher = async (url: string): Promise<VisitorPresencePayload> => {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: "{}",
+    cache: "no-store",
+  })
+  const result = await response.json().catch(() => null)
+  if (!response.ok) throw new Error(result?.error ?? "Não foi possível registrar sua presença.")
+  return result as VisitorPresencePayload
+}
+
+const adminPresenceFetcher = async (url: string): Promise<AdminPresencePayload> => {
+  const response = await fetch(url, { cache: "no-store" })
+  if (!response.ok) throw new Error("Não foi possível carregar os visitantes online.")
   return response.json()
 }
 
@@ -77,7 +98,6 @@ export function DemandDashboard() {
   const [filter, setFilter] = useState<StatusFilter>("todos")
   const [query, setQuery] = useState("")
   const [category, setCategory] = useState("")
-  const [requesterName, setRequesterName] = useState("")
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isAdminDialogOpen, setIsAdminDialogOpen] = useState(false)
   const [notice, setNotice] = useState<Notice | null>(null)
@@ -90,11 +110,31 @@ export function DemandDashboard() {
     sessionFetcher,
     { revalidateOnFocus: true, revalidateOnReconnect: true },
   )
+  const isAdmin = adminSession?.authenticated === true
+  const isDesigner = isAdmin && view === "designer"
+  const {
+    data: visitorPresence,
+    isLoading: isPresenceLoading,
+    mutate: mutateVisitorPresence,
+  } = useSWR<VisitorPresencePayload>("/api/presence", presenceFetcher, {
+    refreshInterval: 30_000,
+    revalidateOnFocus: true,
+    revalidateOnReconnect: true,
+  })
+  const {
+    data: adminPresence,
+    error: adminPresenceError,
+  } = useSWR<AdminPresencePayload>(isAdmin ? "/api/admin/presence" : null, adminPresenceFetcher, {
+    refreshInterval: 15_000,
+    revalidateOnFocus: true,
+    revalidateOnReconnect: true,
+  })
 
   const requests = data?.requests ?? []
   const activity = data?.activity ?? []
-  const isAdmin = adminSession?.authenticated === true
-  const isDesigner = isAdmin && view === "designer"
+  const visitorName = visitorPresence?.visitorName ?? ""
+  const onlineVisitors = adminPresence?.visitors ?? []
+  const isOnlinePresenceLoading = isAdmin && !adminPresence && !adminPresenceError
   const counts = useMemo(() => ({
     todos: requests.length,
     pedido: requests.filter((request) => request.status === "pedido").length,
@@ -174,6 +214,21 @@ export function DemandDashboard() {
     }
   }
 
+  async function handleVisitorRegistration(name: string) {
+    const response = await fetch("/api/presence", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+      cache: "no-store",
+    })
+    const result = await response.json().catch(() => null)
+    if (!response.ok) throw new Error(result?.error ?? "Não foi possível registrar seu nome.")
+
+    const payload = result as VisitorPresencePayload
+    if (!payload.visitorName) throw new Error("Informe seu nome para continuar.")
+    await mutateVisitorPresence(payload, { revalidate: false })
+  }
+
   async function handleAdminLogin() {
     await mutateAdminSession()
     setView("designer")
@@ -201,13 +256,26 @@ export function DemandDashboard() {
     setView(isDesigner ? "team" : "designer")
   }
 
+  if (isPresenceLoading && !visitorPresence) {
+    return (
+      <main className="visitor-loading-screen" role="status" aria-live="polite">
+        <Brand compact />
+        <span>Preparando sua central de criação…</span>
+      </main>
+    )
+  }
+
+  if (!visitorName) {
+    return (
+      <main className="visitor-entry-shell">
+        <header className="visitor-entry-brand"><Brand /></header>
+        <VisitorNameDialog open onSubmit={handleVisitorRegistration} />
+      </main>
+    )
+  }
+
   return (
     <div className="app-shell">
-      <div className="brand-strip">
-        <span><strong>///</strong> ADDEX COMPANY <span className="strip-separator">·</span> DESIGN DESK</span>
-        <span className="strip-edition">CREATIVE OPERATIONS <span>01 / 26</span></span>
-      </div>
-
       <header className="topbar">
         <Brand />
         <nav className="primary-nav" aria-label="Navegação principal">
@@ -221,7 +289,7 @@ export function DemandDashboard() {
         <div className="topbar-actions">
           <span className="access-state">
             <span className={`indicator-dot${isAdmin ? " indicator-dot-admin" : ""}`} aria-hidden="true" />
-            {isAdmin ? "Acesso de Gustavo" : "Equipe criativa"}
+            {isAdmin ? "Gustavo / admin" : `Olá, ${visitorName}`}
           </span>
           <button className="button button-admin" type="button" onClick={openAdminArea}>
             {!isAdmin ? <LockKeyhole size={15} aria-hidden="true" /> : isDesigner ? <Eye size={15} aria-hidden="true" /> : <ShieldCheck size={15} aria-hidden="true" />}
@@ -236,32 +304,9 @@ export function DemandDashboard() {
       </header>
 
       <main className="main-content">
-        <section className="hero-section" aria-labelledby="page-title">
-          <div className="hero-copy">
-            <p className="eyebrow hero-eyebrow"><span>///</span> ADDEX COMPANY / CREATIVE OPERATIONS</p>
-            <h1 id="page-title" className="hero-title">
-              {tab === "history" ? (
-                <>HISTÓRICO<span className="hero-accent">DA CRIAÇÃO<span className="hero-period">.</span></span></>
-              ) : (
-                <>DEMANDAS<span className="hero-accent">DE CRIAÇÃO<span className="hero-period">.</span></span></>
-              )}
-            </h1>
-            <p className="hero-description">
-              {tab === "history"
-                ? "Uma visão clara de cada etapa, da solicitação à entrega."
-                : "Briefings organizados, prazos visíveis e criação em movimento."}
-            </p>
-          </div>
-          <div className="hero-aside" aria-label={`${counts.todos} demandas na fila`}>
-            <span className="hero-aside-kicker">GUSTAVO <span>/</span> DESIGNER</span>
-            <strong className="hero-counter">{String(counts.todos).padStart(2, "0")}</strong>
-            <div className="hero-aside-bottom">
-              <span className="hero-lime-mark" aria-hidden="true" />
-              <span>DEMANDAS<br />NA FILA</span>
-              <span className="hero-serial">KINGG<br />STUDIO 01</span>
-            </div>
-          </div>
-        </section>
+        <h1 id="page-title" className="sr-only">
+          {tab === "history" ? "Histórico de criação" : "Demandas de criação"}
+        </h1>
 
         {notice && (
           <div className={`notice notice-${notice.tone}`} role={notice.tone === "error" ? "alert" : "status"}>
@@ -348,7 +393,8 @@ export function DemandDashboard() {
 
               <aside className="side-panel" aria-label={isDesigner ? "Resumo de produção" : "Nova solicitação"}>
                 {isDesigner ? (
-                  <section className="designer-panel">
+                  <>
+                    <section className="designer-panel">
                     <p className="eyebrow">PAINEL DO DESIGNER <span className="eyebrow-number">/ G</span></p>
                     <h2>Olá, Gustavo<span>.</span></h2>
                     <p className="designer-panel-copy">Gerencie status e prioridades, remova demandas e compartilhe as entregas finais.</p>
@@ -362,17 +408,22 @@ export function DemandDashboard() {
                       Ver histórico <ArrowUpRight size={16} aria-hidden="true" />
                     </button>
                   </section>
+                    <OnlineVisitorsPanel
+                      visitors={onlineVisitors}
+                      isLoading={isOnlinePresenceLoading}
+                      hasError={Boolean(adminPresenceError)}
+                    />
+                  </>
                 ) : (
                   <RequestForm
-                    requesterName={requesterName}
-                    onRequesterNameChange={setRequesterName}
+                    requesterName={visitorName}
                     onCreate={createRequest}
                     isSubmitting={isSubmitting}
                   />
                 )}
                 <div className="side-note">
                   <span className="side-note-mark">i</span>
-                  <p>Um briefing com objetivo, formato e referência ajuda a organizar a entrega.</p>
+                  <p>{isDesigner ? "A lista atualiza automaticamente enquanto as pessoas navegam." : "Um briefing com objetivo, formato e referência ajuda a organizar a entrega."}</p>
                 </div>
               </aside>
             </div>

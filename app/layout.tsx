@@ -3,13 +3,13 @@ import "@fontsource-variable/manrope"
 import "./globals.css"
 
 export const metadata: Metadata = {
-  title: "KINGG — Central de criação",
-  description: "Painel de demandas de design da Addex Company, com briefings, prazos e entregas em um único fluxo.",
+  title: "KINGG — Fluxo criativo",
+  description: "Central de demandas criativas da Addex Company, com briefings, prazos, entregas e acompanhamento de presença.",
   applicationName: "KINGG",
 }
 
 export const viewport: Viewport = {
-  themeColor: "#22202B",
+  themeColor: "#201e28",
   colorScheme: "dark",
   width: "device-width",
   initialScale: 1,

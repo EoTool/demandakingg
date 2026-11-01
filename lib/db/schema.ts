@@ -1,4 +1,4 @@
-import { index, pgTable, smallint, text, timestamp, uuid, date } from "drizzle-orm/pg-core"
+import { date, index, pgTable, smallint, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core"
 import type { ActorRole, RequestStatus } from "@/lib/demands"
 
 export const designRequests = pgTable(
@@ -42,3 +42,19 @@ export const adminSessions = pgTable("admin_sessions", {
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 })
+
+export const siteVisitors = pgTable(
+  "site_visitors",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: text("userId").notNull(),
+    tokenHash: text("token_hash").notNull(),
+    displayName: text("display_name").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("site_visitors_user_token_unique").on(table.userId, table.tokenHash),
+    index("site_visitors_user_last_seen_idx").on(table.userId, table.lastSeenAt),
+  ],
+)
