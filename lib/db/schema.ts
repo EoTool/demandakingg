@@ -34,3 +34,11 @@ export const designRequestActivity = pgTable(
   },
   (table) => [index("design_request_activity_user_created_at_idx").on(table.userId, table.createdAt)],
 )
+
+export const adminSessions = pgTable("admin_sessions", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  userId: text("userId").notNull(),
+  tokenHash: text("token_hash").notNull().unique(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+})
