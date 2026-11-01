@@ -5,12 +5,11 @@ import { REQUEST_CATEGORIES, PRIORITY_LABELS, type CreateRequestInput } from "@/
 
 type RequestFormProps = {
   requesterName: string
-  onRequesterNameChange: (name: string) => void
   onCreate: (input: CreateRequestInput) => Promise<boolean>
   isSubmitting: boolean
 }
 
-export function RequestForm({ requesterName, onRequesterNameChange, onCreate, isSubmitting }: RequestFormProps) {
+export function RequestForm({ requesterName, onCreate, isSubmitting }: RequestFormProps) {
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const form = event.currentTarget
@@ -21,14 +20,11 @@ export function RequestForm({ requesterName, onRequesterNameChange, onCreate, is
       description: String(formData.get("description") ?? "").trim(),
       category: String(formData.get("category") ?? REQUEST_CATEGORIES[0]) as CreateRequestInput["category"],
       priority: Number(formData.get("priority") ?? 2),
-      dueDate: String(formData.get("dueDate") ?? "") || null,
-      referenceUrl: String(formData.get("referenceUrl") ?? "").trim() || null,
+      dueDate: String(formData.get("dueDate") ?? ""),
+      referenceUrl: String(formData.get("referenceUrl") ?? "").trim(),
     })
 
-    if (created) {
-      form.reset()
-      onRequesterNameChange(requesterName)
-    }
+    if (created) form.reset()
   }
 
   return (
@@ -48,10 +44,10 @@ export function RequestForm({ requesterName, onRequesterNameChange, onCreate, is
           name="requesterName"
           autoComplete="name"
           value={requesterName}
-          onChange={(event) => onRequesterNameChange(event.target.value)}
+          readOnly
+          aria-readonly="true"
           maxLength={80}
           required
-          placeholder="Como podemos te chamar?"
         />
       </label>
 

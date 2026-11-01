@@ -34,16 +34,16 @@ const safeUrlSchema = z
 const createRequestSchema = z.object({
   requesterName: z.string().trim().min(1).max(80),
   title: z.string().trim().min(2).max(120),
-  description: z.string().trim().max(5000).default(""),
+  description: z.string().trim().max(5000).nullish().transform((value) => value ?? ""),
   category: z.enum(REQUEST_CATEGORIES),
   priority: z.coerce.number().int().min(0).max(3),
   dueDate: z
     .string()
     .trim()
     .refine((value) => value === "" || isValidDate(value), "Prazo inválido")
-    .optional()
-    .default(""),
-  referenceUrl: safeUrlSchema.optional().default(""),
+    .nullish()
+    .transform((value) => value ?? ""),
+  referenceUrl: safeUrlSchema.nullish().transform((value) => value ?? ""),
 })
 
 export async function GET() {

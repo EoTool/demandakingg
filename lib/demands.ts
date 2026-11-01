@@ -56,8 +56,8 @@ export type CreateRequestInput = {
   description: string
   category: RequestCategory
   priority: number
-  dueDate: string | null
-  referenceUrl: string | null
+  dueDate: string
+  referenceUrl: string
 }
 
 export type RequestUpdate = {
