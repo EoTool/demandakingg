@@ -1,22 +1,20 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { ArrowUpRight, CalendarDays, RotateCcw, Save, Trash2 } from "lucide-react"
+import { ArrowUpRight, CalendarDays, Save, Trash2 } from "lucide-react"
 import {
   PRIORITY_LABELS,
   STATUS_LABELS,
   REQUEST_STATUSES,
-  type ActorRole,
   type RequestItem,
   type RequestUpdate,
 } from "@/lib/demands"
 
 type RequestCardProps = {
   request: RequestItem
-  isDesigner: boolean
-  currentName: string
+  isAdmin: boolean
   onUpdate: (id: string, update: RequestUpdate) => Promise<void>
-  onCancel: (id: string, actorName: string, actorRole: ActorRole) => Promise<void>
+  onDelete: (id: string) => Promise<void>
 }
 
 function localDateString() {
@@ -39,11 +37,10 @@ function displayDateTime(value: string) {
   })
 }
 
-export function RequestCard({ request, isDesigner, currentName, onUpdate, onCancel }: RequestCardProps) {
+export function RequestCard({ request, isAdmin, onUpdate, onDelete }: RequestCardProps) {
   const [deliveryUrl, setDeliveryUrl] = useState(request.deliveryUrl ?? "")
   const [isSaving, setIsSaving] = useState(false)
   const isLate = Boolean(request.dueDate && request.dueDate < localDateString() && request.status !== "concluido")
-  const isOwnRequest = currentName.trim().toLocaleLowerCase("pt-BR") === request.requestedBy.trim().toLocaleLowerCase("pt-BR")
 
   useEffect(() => {
     setDeliveryUrl(request.deliveryUrl ?? "")
@@ -51,30 +48,36 @@ export function RequestCard({ request, isDesigner, currentName, onUpdate, onCanc
 
   async function saveDelivery() {
     setIsSaving(true)
-    await onUpdate(request.id, {
-      actorName: "Gustavo",
-      actorRole: "designer",
-      deliveryUrl: deliveryUrl.trim(),
-    })
-    setIsSaving(false)
+    try {
+      await onUpdate(request.id, { deliveryUrl: deliveryUrl.trim() })
+    } finally {
+      setIsSaving(false)
+    }
   }
 
-  function cancelRequest() {
-    if (!window.confirm(`Cancelar “${request.title}”?`)) return
-    void onCancel(request.id, currentName, "solicitante")
+  function confirmDelete() {
+    if (!window.confirm(`Excluir “${request.title}”? Esta ação não pode ser desfeita.`)) return
+    void onDelete(request.id)
   }
 
   return (
     <article className={`request-card${request.status === "concluido" ? " request-card-done" : ""}`}>
       <div className="request-card-topline">
-        <span className={`status-badge status-${request.status}`}>
-          <span className="status-dot" aria-hidden="true" />
-          {STATUS_LABELS[request.status]}
-        </span>
-        <span className={`priority-badge priority-${request.priority}`}>
-          <span className="priority-marker" aria-hidden="true" />
-          {PRIORITY_LABELS[request.priority] ?? "Normal"}
-        </span>
+        <div className="request-badges">
+          <span className={`status-badge status-${request.status}`}>
+            <span className="status-dot" aria-hidden="true" />
+            {STATUS_LABELS[request.status]}
+          </span>
+          <span className={`priority-badge priority-${request.priority}`}>
+            <span className="priority-marker" aria-hidden="true" />
+            {PRIORITY_LABELS[request.priority] ?? "Normal"}
+          </span>
+        </div>
+        {isAdmin && (
+          <button className="button button-danger" type="button" onClick={confirmDelete} aria-label={`Excluir demanda ${request.title}`}>
+            <Trash2 size={14} aria-hidden="true" /> Excluir
+          </button>
+        )}
       </div>
 
       <div className="request-title-row">
@@ -110,7 +113,7 @@ export function RequestCard({ request, isDesigner, currentName, onUpdate, onCanc
         </div>
       )}
 
-      {isDesigner ? (
+      {isAdmin ? (
         <div className="designer-controls">
           <div className="field-row controls-row">
             <label className="field compact-field">
@@ -118,11 +121,7 @@ export function RequestCard({ request, isDesigner, currentName, onUpdate, onCanc
               <select
                 aria-label={`Andamento de ${request.title}`}
                 value={request.status}
-                onChange={(event) => void onUpdate(request.id, {
-                  actorName: "Gustavo",
-                  actorRole: "designer",
-                  status: event.target.value as RequestItem["status"],
-                })}
+                onChange={(event) => void onUpdate(request.id, { status: event.target.value as RequestItem["status"] })}
               >
                 {REQUEST_STATUSES.map((status) => (
                   <option key={status} value={status}>{STATUS_LABELS[status]}</option>
@@ -134,11 +133,7 @@ export function RequestCard({ request, isDesigner, currentName, onUpdate, onCanc
               <select
                 aria-label={`Prioridade de ${request.title}`}
                 value={request.priority}
-                onChange={(event) => void onUpdate(request.id, {
-                  actorName: "Gustavo",
-                  actorRole: "designer",
-                  priority: Number(event.target.value),
-                })}
+                onChange={(event) => void onUpdate(request.id, { priority: Number(event.target.value) })}
               >
                 {PRIORITY_LABELS.map((priority, index) => (
                   <option key={priority} value={index}>{priority}</option>
@@ -171,22 +166,6 @@ export function RequestCard({ request, isDesigner, currentName, onUpdate, onCanc
             {request.status === "produzindo" && "Gustavo está trabalhando nesta demanda."}
             {request.status === "concluido" && "A entrega está pronta para revisão."}
           </span>
-          {isOwnRequest && request.status === "concluido" && (
-            <button className="button button-subtle" type="button" onClick={() => void onUpdate(request.id, {
-              actorName: currentName,
-              actorRole: "solicitante",
-              adjustment: true,
-            })}>
-              <RotateCcw size={15} aria-hidden="true" />
-              Pedir ajuste
-            </button>
-          )}
-          {isOwnRequest && request.status === "pedido" && (
-            <button className="button button-danger" type="button" onClick={cancelRequest}>
-              <Trash2 size={15} aria-hidden="true" />
-              Cancelar pedido
-            </button>
-          )}
         </div>
       )}
     </article>

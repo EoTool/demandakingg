@@ -3,23 +3,35 @@
 import { useMemo, useState } from "react"
 import useSWR from "swr"
 import { ActivityTimeline } from "@/components/activity-timeline"
+import { AdminAccessDialog } from "@/components/admin-access-dialog"
 import { Brand } from "@/components/brand"
 import { RequestCard } from "@/components/request-card"
 import { RequestForm } from "@/components/request-form"
 import {
   REQUEST_CATEGORIES,
-  type ActorRole,
   type CreateRequestInput,
   type RequestStatus,
   type RequestUpdate,
   type RequestsPayload,
 } from "@/lib/demands"
-import { ArrowLeft, ArrowUpRight, Check, Eye, History, LayoutDashboard, Search } from "lucide-react"
+import {
+  ArrowRight,
+  ArrowUpRight,
+  Check,
+  Eye,
+  History,
+  LayoutDashboard,
+  LockKeyhole,
+  LogOut,
+  Search,
+  ShieldCheck,
+} from "lucide-react"
 
 type ViewMode = "team" | "designer"
 type PageTab = "demands" | "history"
 type StatusFilter = "todos" | RequestStatus | "atrasadas"
 type Notice = { tone: "success" | "error"; message: string }
+type AdminSessionPayload = { authenticated: boolean; name: string | null }
 
 const fetcher = async (url: string): Promise<RequestsPayload> => {
   const response = await fetch(url, { cache: "no-store" })
@@ -27,15 +39,27 @@ const fetcher = async (url: string): Promise<RequestsPayload> => {
   return response.json()
 }
 
-async function sendJson(url: string, method: "POST" | "PATCH" | "DELETE", body: unknown) {
+const sessionFetcher = async (url: string): Promise<AdminSessionPayload> => {
+  const response = await fetch(url, { cache: "no-store" })
+  if (!response.ok) throw new Error("Não foi possível validar o acesso administrativo.")
+  return response.json()
+}
+
+class ActionError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message)
+    this.name = "ActionError"
+  }
+}
+
+async function sendJson(url: string, method: "POST" | "PATCH" | "DELETE", body?: unknown) {
   const response = await fetch(url, {
     method,
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
+    ...(body === undefined ? {} : { headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }),
     cache: "no-store",
   })
   const result = await response.json().catch(() => null)
-  if (!response.ok) throw new Error(result?.error ?? "Não foi possível concluir a ação.")
+  if (!response.ok) throw new ActionError(result?.error ?? "Não foi possível concluir a ação.", response.status)
 }
 
 function localDateString() {
@@ -55,14 +79,22 @@ export function DemandDashboard() {
   const [category, setCategory] = useState("")
   const [requesterName, setRequesterName] = useState("")
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [isAdminDialogOpen, setIsAdminDialogOpen] = useState(false)
   const [notice, setNotice] = useState<Notice | null>(null)
   const { data, error, isLoading, mutate } = useSWR<RequestsPayload>("/api/requests", fetcher, {
     refreshInterval: 20_000,
     revalidateOnFocus: true,
   })
+  const { data: adminSession, mutate: mutateAdminSession } = useSWR<AdminSessionPayload>(
+    "/api/admin/session",
+    sessionFetcher,
+    { revalidateOnFocus: true, revalidateOnReconnect: true },
+  )
 
   const requests = data?.requests ?? []
   const activity = data?.activity ?? []
+  const isAdmin = adminSession?.authenticated === true
+  const isDesigner = isAdmin && view === "designer"
   const counts = useMemo(() => ({
     todos: requests.length,
     pedido: requests.filter((request) => request.status === "pedido").length,
@@ -119,76 +151,117 @@ export function DemandDashboard() {
       await mutate()
       setNotice({ tone: "success", message: "Demanda atualizada." })
     } catch (cause) {
+      if (cause instanceof ActionError && cause.status === 401) {
+        setView("team")
+        void mutateAdminSession()
+      }
       setNotice({ tone: "error", message: cause instanceof Error ? cause.message : "Não foi possível atualizar a demanda." })
     }
   }
 
-  async function cancelRequest(id: string, actorName: string, actorRole: ActorRole) {
+  async function deleteRequest(id: string) {
     setNotice(null)
     try {
-      await sendJson(`/api/requests/${id}`, "DELETE", { actorName, actorRole })
+      await sendJson(`/api/requests/${id}`, "DELETE")
       await mutate()
-      setNotice({ tone: "success", message: "Pedido cancelado." })
+      setNotice({ tone: "success", message: "Demanda removida da fila." })
     } catch (cause) {
-      setNotice({ tone: "error", message: cause instanceof Error ? cause.message : "Não foi possível cancelar o pedido." })
+      if (cause instanceof ActionError && cause.status === 401) {
+        setView("team")
+        void mutateAdminSession()
+      }
+      setNotice({ tone: "error", message: cause instanceof Error ? cause.message : "Não foi possível remover a demanda." })
     }
   }
 
-  const isDesigner = view === "designer"
-  const pageTitle = tab === "history" ? "Histórico" : "Demandas de criação"
+  async function handleAdminLogin() {
+    await mutateAdminSession()
+    setView("designer")
+    setIsAdminDialogOpen(false)
+    setNotice({ tone: "success", message: "Acesso administrativo iniciado." })
+  }
+
+  async function handleAdminLogout() {
+    setNotice(null)
+    try {
+      await sendJson("/api/admin/session", "DELETE")
+      setView("team")
+      await mutateAdminSession()
+      setNotice({ tone: "success", message: "Sessão administrativa encerrada." })
+    } catch (cause) {
+      setNotice({ tone: "error", message: cause instanceof Error ? cause.message : "Não foi possível encerrar a sessão." })
+    }
+  }
+
+  function openAdminArea() {
+    if (!isAdmin) {
+      setIsAdminDialogOpen(true)
+      return
+    }
+    setView(isDesigner ? "team" : "designer")
+  }
 
   return (
     <div className="app-shell">
-      <aside className="sidebar">
-        <Brand />
-        <div className="workspace-label">ESPAÇO DE TRABALHO</div>
-        <div className="workspace-switcher">
-          <span className="workspace-initial">K</span>
-          <span className="workspace-copy"><strong>Addex Company</strong><small>Equipe de criação</small></span>
-          <span className="workspace-status" aria-label="Ativo" />
-        </div>
+      <div className="brand-strip">
+        <span><strong>///</strong> ADDEX COMPANY <span className="strip-separator">·</span> DESIGN DESK</span>
+        <span className="strip-edition">CREATIVE OPERATIONS <span>01 / 26</span></span>
+      </div>
 
-        <nav className="sidebar-nav" aria-label="Navegação principal">
-          <span className="nav-section-label">CENTRAL</span>
-          <button className={`nav-item${tab === "demands" ? " nav-item-active" : ""}`} type="button" onClick={() => setTab("demands")} aria-current={tab === "demands" ? "page" : undefined}>
-            <LayoutDashboard size={18} aria-hidden="true" />
-            <span>Demandas</span>
-            <span className="nav-count">{counts.todos}</span>
+      <header className="topbar">
+        <Brand />
+        <nav className="primary-nav" aria-label="Navegação principal">
+          <button className={tab === "demands" ? "primary-nav-active" : ""} type="button" onClick={() => setTab("demands")} aria-current={tab === "demands" ? "page" : undefined}>
+            <LayoutDashboard size={15} aria-hidden="true" /> Demandas <span className="nav-count">{counts.todos}</span>
           </button>
-          <button className={`nav-item${tab === "history" ? " nav-item-active" : ""}`} type="button" onClick={() => setTab("history")} aria-current={tab === "history" ? "page" : undefined}>
-            <History size={18} aria-hidden="true" />
-            <span>Histórico</span>
+          <button className={tab === "history" ? "primary-nav-active" : ""} type="button" onClick={() => setTab("history")} aria-current={tab === "history" ? "page" : undefined}>
+            <History size={15} aria-hidden="true" /> Histórico
           </button>
         </nav>
-
-        <div className="sidebar-spacer" />
-        <div className="sidebar-contact">
-          <span className="contact-avatar">G</span>
-          <span><strong>Gustavo</strong><small>Designer · Addex Company</small></span>
+        <div className="topbar-actions">
+          <span className="access-state">
+            <span className={`indicator-dot${isAdmin ? " indicator-dot-admin" : ""}`} aria-hidden="true" />
+            {isAdmin ? "Acesso de Gustavo" : "Equipe criativa"}
+          </span>
+          <button className="button button-admin" type="button" onClick={openAdminArea}>
+            {!isAdmin ? <LockKeyhole size={15} aria-hidden="true" /> : isDesigner ? <Eye size={15} aria-hidden="true" /> : <ShieldCheck size={15} aria-hidden="true" />}
+            {!isAdmin ? "Entrar como Gustavo" : isDesigner ? "Visão da equipe" : "Abrir painel"}
+          </button>
+          {isAdmin && (
+            <button className="button button-logout" type="button" onClick={() => void handleAdminLogout()} aria-label="Encerrar sessão administrativa">
+              <LogOut size={15} aria-hidden="true" />
+            </button>
+          )}
         </div>
-        <p className="sidebar-footnote">KINGG <span>·</span> fluxo de criação</p>
-      </aside>
+      </header>
 
       <main className="main-content">
-        <header className="page-header">
-          <div className="page-heading">
-            <p className="eyebrow">ADDEX COMPANY <span>/</span> CRIAÇÃO</p>
-            <h1>{pageTitle}</h1>
-            <p className="page-subtitle">
-              {tab === "history" ? "Acompanhe o que mudou na fila de criação." : "Pedidos claros, prazos visíveis e andamento em um só lugar."}
+        <section className="hero-section" aria-labelledby="page-title">
+          <div className="hero-copy">
+            <p className="eyebrow hero-eyebrow"><span>///</span> ADDEX COMPANY / CREATIVE OPERATIONS</p>
+            <h1 id="page-title" className="hero-title">
+              {tab === "history" ? (
+                <>HISTÓRICO<span className="hero-accent">DA CRIAÇÃO<span className="hero-period">.</span></span></>
+              ) : (
+                <>DEMANDAS<span className="hero-accent">DE CRIAÇÃO<span className="hero-period">.</span></span></>
+              )}
+            </h1>
+            <p className="hero-description">
+              {tab === "history"
+                ? "Uma visão clara de cada etapa, da solicitação à entrega."
+                : "Briefings organizados, prazos visíveis e criação em movimento."}
             </p>
           </div>
-          <div className="header-actions">
-            <span className={`view-indicator${isDesigner ? " view-indicator-designer" : ""}`}>
-              <span className="indicator-dot" aria-hidden="true" />
-              {isDesigner ? "Visão do designer" : "Equipe criativa"}
-            </span>
-            <button className="button button-mode" type="button" onClick={() => setView(isDesigner ? "team" : "designer")}>
-              {isDesigner ? <ArrowLeft size={16} aria-hidden="true" /> : <Eye size={16} aria-hidden="true" />}
-              {isDesigner ? "Voltar à equipe" : "Visão do Gustavo"}
-            </button>
+          <div className="hero-aside" aria-label={`${counts.todos} demandas na fila`}>
+            <span className="hero-aside-kicker">GUSTAVO <span>/</span> DESIGNER</span>
+            <strong className="hero-counter">{String(counts.todos).padStart(2, "0")}</strong>
+            <div className="hero-aside-bottom">
+              <span className="hero-lime-mark" aria-hidden="true" />
+              <span>DEMANDAS<br />NA FILA</span>
+              <span className="hero-serial">KINGG<br />STUDIO 01</span>
+            </div>
           </div>
-        </header>
+        </section>
 
         {notice && (
           <div className={`notice notice-${notice.tone}`} role={notice.tone === "error" ? "alert" : "status"}>
@@ -203,7 +276,7 @@ export function DemandDashboard() {
           <>
             <section className="stats-grid" aria-label="Resumo das demandas">
               {[
-                { id: "todos" as const, label: "Total de pedidos", value: counts.todos },
+                { id: "todos" as const, label: "Todas as demandas", value: counts.todos },
                 { id: "pedido" as const, label: "Aguardando", value: counts.pedido },
                 { id: "produzindo" as const, label: "Em criação", value: counts.produzindo },
                 { id: "concluido" as const, label: "Entregues", value: counts.concluido },
@@ -217,7 +290,7 @@ export function DemandDashboard() {
                   onClick={() => setFilter(item.id)}
                 >
                   <span>{item.label}</span>
-                  <strong>{item.value}</strong>
+                  <strong>{String(item.value).padStart(2, "0")}</strong>
                 </button>
               ))}
             </section>
@@ -226,7 +299,7 @@ export function DemandDashboard() {
               <section className="board-section" aria-labelledby="queue-title">
                 <div className="board-heading">
                   <div>
-                    <p className="eyebrow">FILA DE PRODUÇÃO</p>
+                    <p className="eyebrow">FILA DE PRODUÇÃO <span className="eyebrow-number">/ 01</span></p>
                     <h2 id="queue-title">Pedidos da equipe</h2>
                   </div>
                   <span className="result-count">{visibleRequests.length} {visibleRequests.length === 1 ? "pedido" : "pedidos"}</span>
@@ -257,10 +330,9 @@ export function DemandDashboard() {
                       <RequestCard
                         key={request.id}
                         request={request}
-                        isDesigner={isDesigner}
-                        currentName={isDesigner ? "Gustavo" : requesterName}
+                        isAdmin={isDesigner}
                         onUpdate={updateRequest}
-                        onCancel={cancelRequest}
+                        onDelete={deleteRequest}
                       />
                     ))}
                   </div>
@@ -277,15 +349,15 @@ export function DemandDashboard() {
               <aside className="side-panel" aria-label={isDesigner ? "Resumo de produção" : "Nova solicitação"}>
                 {isDesigner ? (
                   <section className="designer-panel">
-                    <p className="eyebrow">VISÃO DE PRODUÇÃO</p>
-                    <h2>Olá, Gustavo.</h2>
-                    <p className="designer-panel-copy">Atualize o andamento, ajuste prioridades e compartilhe os links finais por aqui.</p>
+                    <p className="eyebrow">PAINEL DO DESIGNER <span className="eyebrow-number">/ G</span></p>
+                    <h2>Olá, Gustavo<span>.</span></h2>
+                    <p className="designer-panel-copy">Gerencie status e prioridades, remova demandas e compartilhe as entregas finais.</p>
                     <div className="designer-summary">
-                      <div><span>Na fila</span><strong>{counts.pedido}</strong></div>
-                      <div><span>Em criação</span><strong>{counts.produzindo}</strong></div>
-                      <div><span>Entregues</span><strong>{counts.concluido}</strong></div>
+                      <div><span>Na fila</span><strong>{String(counts.pedido).padStart(2, "0")}</strong></div>
+                      <div><span>Em criação</span><strong>{String(counts.produzindo).padStart(2, "0")}</strong></div>
+                      <div><span>Entregues</span><strong>{String(counts.concluido).padStart(2, "0")}</strong></div>
                     </div>
-                    <div className="designer-tip"><span className="tip-mark"><Check size={15} aria-hidden="true" /></span><p>As mudanças de status ficam registradas no histórico para toda a equipe.</p></div>
+                    <div className="designer-tip"><span className="tip-mark"><Check size={15} aria-hidden="true" /></span><p>As alterações ficam registradas no histórico da equipe.</p></div>
                     <button className="button button-text-action" type="button" onClick={() => setTab("history")}>
                       Ver histórico <ArrowUpRight size={16} aria-hidden="true" />
                     </button>
@@ -309,7 +381,7 @@ export function DemandDashboard() {
           <section className="history-section" aria-labelledby="history-title">
             <div className="board-heading history-heading">
               <div>
-                <p className="eyebrow">REGISTRO DE ATIVIDADE</p>
+                <p className="eyebrow">REGISTRO DE ATIVIDADE <span className="eyebrow-number">/ 02</span></p>
                 <h2 id="history-title">O que mudou</h2>
               </div>
               <span className="result-count">{activity.length} {activity.length === 1 ? "registro" : "registros"}</span>
@@ -319,10 +391,16 @@ export function DemandDashboard() {
         )}
 
         <footer className="page-footer">
-          <span>Feito para o fluxo criativo da Addex Company.</span>
+          <span><strong>KINGG</strong> <span className="footer-separator">/</span> fluxo criativo da Addex Company</span>
           <span><span className="footer-dot" /> Atualizado automaticamente</span>
         </footer>
       </main>
+
+      <AdminAccessDialog
+        open={isAdminDialogOpen}
+        onClose={() => setIsAdminDialogOpen(false)}
+        onAuthenticated={handleAdminLogin}
+      />
     </div>
   )
 }

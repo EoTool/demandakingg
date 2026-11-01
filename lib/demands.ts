@@ -61,10 +61,7 @@ export type CreateRequestInput = {
 }
 
 export type RequestUpdate = {
-  actorName: string
-  actorRole: ActorRole
   status?: RequestStatus
   priority?: number
   deliveryUrl?: string
-  adjustment?: boolean
 }

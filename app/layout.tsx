@@ -3,8 +3,8 @@ import "@fontsource-variable/manrope"
 import "./globals.css"
 
 export const metadata: Metadata = {
-  title: "KINGG — Demandas de criação",
-  description: "Central de solicitações de design da equipe criativa da Addex Company, com acompanhamento feito por Gustavo.",
+  title: "KINGG — Central de criação",
+  description: "Painel de demandas de design da Addex Company, com briefings, prazos e entregas em um único fluxo.",
   applicationName: "KINGG",
 }
 
